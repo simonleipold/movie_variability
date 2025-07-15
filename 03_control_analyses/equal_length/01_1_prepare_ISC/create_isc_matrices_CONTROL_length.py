@@ -6,9 +6,11 @@ import matplotlib.pyplot as plt
 
 from nltools.data import Brain_Data, Adjacency
 from nltools.mask import expand_mask, roi_to_brain
+from nltools.stats import threshold
 
 from nilearn import plotting as nplot
 from sklearn.metrics import pairwise_distances
+from statsmodels.stats.multitest import fdrcorrection  # Import for FDR correction
 
 ## location of main project directory on HPC
 projpath = '/project/3011157.03/Simon/proj_2022_CABB_movie/'
@@ -30,16 +32,23 @@ atlas_labels = pd.read_csv(os.path.join(projpath, 'MRI', 'Brainnetome_atlas/Brai
 mov_csv_path = os.path.join(fmriprep_dir, 'derivatives', 'secLev_nltools_ISC_ROI', mask_name, 'csv_files')
 
 ## where should the ISC matrices be stored?
-dir_out = os.path.join(projpath, 'Scripts', '03_2ndLev_ISC', 'matrices')
+## [new directory for control analysis]
+dir_out = os.path.join(projpath, 'Scripts', 'MovVar_CommsBio_Revision01', 'control_length', 'matrices')
 if not os.path.exists(os.path.join(dir_out)):
     os.makedirs(os.path.join(dir_out))
     print('Dir %s created ' % dir_out)
 
 ## where should the visualizations be stored?
-dir_out_vis = os.path.join(projpath, 'Scripts', '03_2ndLev_ISC', 'visualizations')
+dir_out_vis = os.path.join(projpath, 'Scripts', 'MovVar_CommsBio_Revision01', 'control_length', 'visualizations')
 if not os.path.exists(os.path.join(dir_out_vis)):
     os.makedirs(os.path.join(dir_out_vis))
     print('Dir %s created ' % dir_out_vis)
+
+## where should the csv results be stored?
+dir_out_bootstrap = os.path.join(projpath, 'Scripts', 'MovVar_CommsBio_Revision01', 'control_length', 'py_output_permutation')
+if not os.path.exists(os.path.join(dir_out_bootstrap)):
+    os.makedirs(os.path.join(dir_out_bootstrap))
+    print('Dir %s created ' % dir_out_bootstrap)
 
 # create ISC matrices for each movie
 movie_list = ['movie1', 'movie2', 'movie3', 'movie4', 'movie5', 'movie6', 'movie7', 'movie8']
@@ -52,6 +61,10 @@ for movie in movie_list:
         sub_timeseries.append(sub_data.values)
     data = np.array(sub_timeseries)
     n_subs, n_ts, n_parcels = data.shape
+    print('For %s, the number of timepoints is %s' % (movie, n_ts))
+    # Truncate to 134 TRs/seconds (the length of the shortest movie)
+    data = data[:, :134, :]
+    print('For %s, the number of timepoints after truncating is %s' % (movie, data.shape[1]))
     # calculate the ISC matrix for each parcel
     similarity_matrices = [] # list to store the ISC matrices for each parcel
     for parcel in range(n_parcels):
@@ -64,12 +77,30 @@ for movie in movie_list:
         df.to_csv(os.path.join(dir_out, 'ISC_%s_parcel%s.csv' % (movie, parcel+1)), index = True, header = True)
     ## generate a visualization of the mean ISC matrix across subjects
     # extract the mean ISC values across subjects from the similarity matrices and put them into a dictionary
-    isc = {parcel:similarity_matrices[parcel].isc(metric='mean', n_bootstraps=1, n_jobs=1)['isc'] for parcel in range(n_parcels)}
-    isc_brain = roi_to_brain(pd.Series(isc), expand_mask(mask))
+    mean_isc = {parcel:similarity_matrices[parcel].isc(metric='mean', n_bootstraps=1, n_jobs=1)['isc'] for parcel in range(n_parcels)}
+    isc_brain = roi_to_brain(pd.Series(mean_isc), expand_mask(mask))
     nplot.plot_glass_brain(isc_brain.to_nifti(),
         colorbar = True, plot_abs = False,
         cmap = "viridis",
         vmin = -0.5, vmax = 0.5)
     plt.savefig(os.path.join(dir_out_vis, 'Mean_ISC_%s.png' % movie), dpi = 400)
     plt.close()
+    median_isc = {parcel:similarity_matrices[parcel].isc(metric='median', n_bootstraps=1, n_jobs=1)['isc'] for parcel in range(n_parcels)}
+    isc_brain = roi_to_brain(pd.Series(median_isc), expand_mask(mask))
+    nplot.plot_glass_brain(isc_brain.to_nifti(),
+        colorbar = True, plot_abs = False,
+        cmap = "viridis",
+        vmin = -0.5, vmax = 0.5)
+    plt.savefig(os.path.join(dir_out_vis, 'Median_ISC_%s.png' % movie), dpi = 400)
+    plt.close()    
+    # create a Pandas DataFrame with the mean ISC values and median ISC values
+    df = pd.DataFrame({'ISC_mean':mean_isc, 'ISC_median':median_isc})
+    # add the parcel numbers to the DataFrame
+    df['parcel'] = np.arange(1, n_parcels+1)
+    # add the parcel names to the DataFrame
+    df['label'] = atlas_labels['label']
+    # reorder the columns
+    df = df[['parcel', 'label', 'ISC_mean', 'ISC_median']]
+    # save the DataFrame as a CSV file
+    df.to_csv(os.path.join(dir_out_bootstrap, 'ISC_%s.csv' % movie), index = False)
 

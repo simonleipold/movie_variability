@@ -30,6 +30,9 @@ if (!dir.exists(outdir)) {
   dir.create(outdir)
 }
 outdir_vis = "visualizations"
+if (!dir.exists(outdir_vis)) {
+  dir.create(outdir_vis)
+}
 
 # Main --------------------------------------------------------------------
 
@@ -56,16 +59,19 @@ filtered_tibble <- combined_tibble %>%
 # Create a new column 'Pair' combining 'Subject1' and 'Subject2'
 final_tibble <- filtered_tibble %>%
   mutate(Pair = paste(Subject1, Subject2, sep = "_")) %>%
-  mutate(Pair = as.factor(Pair)) %>% 
-  mutate(Movie = as.factor(Movie)) %>% 
-  mutate(Parcel = as.factor(Parcel))
+  mutate(
+    Pair = as.factor(Pair),
+    Movie = as.factor(Movie),
+    Parcel = as.factor(Parcel),
+    FisherZ = 0.5 * log((1 + Correlation) / (1 - Correlation))
+  )
 
 # Perform within-subject ANOVA for each Parcel
 results <- final_tibble %>%
   group_by(Parcel) %>%
   # Carry out the ANOVA with the anova_test function from rstatix
   anova_test(data = .,
-                     dv = Correlation,
+                     dv = FisherZ,
                      wid = Pair,
                      within = Movie)
 
@@ -77,10 +83,12 @@ for (i in seq_along(results$anova)) {
   # Extract F and p values using the specified paths
   F_value <- results$anova[[i]]$ANOVA$F
   p_value <- results$anova[[i]]$ANOVA$p
+  ges_value <- results$anova[[i]]$ANOVA$ges
   parcel_number <- i
   
   # Store these values in the list
-  extracted_data[[i]] <- list(Parcel = parcel_number, Fval = F_value, p = p_value)
+  extracted_data[[i]] <- list(Parcel = parcel_number, Fval = F_value, 
+                              p = p_value, ges = ges_value)
 }
 
 # Convert the list of lists into a tibble
@@ -133,12 +141,13 @@ theme_CABB <- function(){
       strip.text = element_text(
         size = 16))}                #font size
 
-# get parcels with most and least variability
+# get parcels with high and low variability
 high <- 76
 low <- 111
 
+# create tibble with selected parcels for plotting
 plot_tibble <- final_tibble %>% 
-  rename(ISC = Correlation) %>% 
+  rename(ISC = FisherZ) %>% 
   filter(Parcel == paste0("parcel", high) | Parcel == paste0("parcel", low))
 
 # Calculate mean and standard error for each movie
@@ -152,8 +161,46 @@ stats_summary <- plot_tibble %>%
 stats_summary$MovieInt <- as.factor(as.integer(stats_summary$Movie))
 stats_summary <- stats_summary %>%
   mutate(Parcel = factor(Parcel, levels = c("parcel76", "parcel111"),
-                         labels = c("Superior Temporal Gyrus",
-                                    "Parahippocampal Gyrus")))
+                         labels = c("Superior Temporal Gyrus\n",
+                                    "Parahippocampal Gyrus\n")))
+
+# add movie and parcel info to original tibble (for dots plotting)
+plot_tibble <- plot_tibble %>%
+  mutate(MovieInt = as.factor(as.integer(Movie))) %>%
+  mutate(Parcel = factor(Parcel, levels = c("parcel76", "parcel111"),
+                         labels = c("Superior Temporal Gyrus\n",
+                                    "Parahippocampal Gyrus\n")))
+
+# Define the path for the output file
+output_file_path <- file.path(outdir, "SupplementaryFigure1C.csv")
+
+# Write the plot tibble to a CSV file
+write.csv(plot_tibble, output_file_path, row.names = FALSE)
+
+# plot mean, se, and dots
+plot_se_dots <- ggplot(stats_summary, aes(x = MovieInt, y = Avg, fill = Movie)) +
+  geom_col(alpha = 1.0) +  # No transparency on bars
+  geom_jitter(data = plot_tibble, 
+              aes(x = MovieInt, y = ISC), 
+              width = 0.15, 
+              alpha = 0.8, 
+              shape = 21, 
+              color = "black", 
+              # fill = "white",
+              stroke = 0.3) +  # Overlayed points
+  geom_errorbar(aes(ymin = Avg - SE, ymax = Avg + SE), width = 0.2) +
+  labs(x = "Movie", y = "ISC") +
+  scale_fill_brewer(palette = "Dark2") +
+  facet_wrap(~ Parcel) +
+  theme_CABB() +
+  guides(fill = "none")
+
+# Print
+plot_se_dots
+# Save the plot
+ggsave(filename = file.path(outdir_vis, "ANOVA_ISC_example_dots.png"), plot = plot_se_dots,
+       dpi = 400, height = 6, width = 9, bg = "white")
+
 
 # plot mean and se
 plot_se <- ggplot(stats_summary, aes(x = MovieInt, y = Avg, fill = Movie)) +
@@ -174,7 +221,7 @@ ggsave(filename = file.path(outdir_vis, "ANOVA_ISC_example.png"), plot = plot_se
 
 ## Whole brain-plot
 whole_plot_tibble <- final_tibble %>% group_by(Pair, Movie) %>% 
-  summarize(ISC_avg = mean(Correlation))
+  summarize(ISC_avg = mean(FisherZ))
 # anova
 library(ez)
 ezANOVA(data = whole_plot_tibble, dv = ISC_avg, wid = Pair, within = Movie,
@@ -190,6 +237,40 @@ stats_summary <- whole_plot_tibble %>%
   )
 stats_summary$MovieInt <- as.factor(as.integer(stats_summary$Movie))
 
+# Add integer-coded Movie variable to the raw data
+whole_plot_tibble <- whole_plot_tibble %>%
+  mutate(MovieInt = as.factor(as.integer(Movie)))
+
+# Define the path for the output file
+output_file_path <- file.path(outdir, "SupplementaryFigure1A.csv")
+
+# Write the plot tibble to a CSV file
+write.csv(whole_plot_tibble, output_file_path, row.names = FALSE)
+
+# Plot mean, SE, and overlaid data points
+plot_whole_se_dots <- ggplot(stats_summary, aes(x = MovieInt, y = Avg, fill = Movie)) +
+  geom_col(alpha = 1.0) +  # No transparency for bars
+  geom_jitter(data = whole_plot_tibble, 
+              aes(x = MovieInt, y = ISC_avg), 
+              width = 0.15, 
+              alpha = 0.8, 
+              shape = 21, 
+              color = "black", 
+              # fill = "white", 
+              stroke = 0.3) +
+  geom_errorbar(aes(ymin = Avg - SE, ymax = Avg + SE), width = 0.2) +
+  labs(x = "Movie", y = "ISC") +
+  scale_fill_brewer(palette = "Dark2") +
+  theme_CABB() +
+  guides(fill = "none")
+
+# Print the plot
+plot_whole_se_dots
+
+# Save the plot
+ggsave(filename = file.path(outdir_vis, "ANOVA_ISC_whole_dots.png"), plot = plot_whole_se_dots,
+       dpi = 400, height = 6, width = 7, bg = "white")
+
 # plot mean and se
 plot_whole_se <- ggplot(stats_summary, aes(x = MovieInt, y = Avg, fill = Movie)) +
   geom_col() +  # Add colored bars for each movie
@@ -202,6 +283,7 @@ plot_whole_se <- ggplot(stats_summary, aes(x = MovieInt, y = Avg, fill = Movie))
 
 # Print the plot
 plot_whole_se
+
 # Save the plot
 ggsave(filename = file.path(outdir_vis, "ANOVA_ISC_whole.png"), plot = plot_whole_se,
        dpi = 400, height = 6, width = 7, bg = "white")
@@ -213,12 +295,18 @@ ggsave(filename = file.path(outdir_vis, "ANOVA_ISC_whole.png"), plot = plot_whol
 
 corr_tibble <- final_tibble %>%
   group_by(Parcel) %>%
-  summarize(ISC = mean(Correlation))
+  summarize(ISC = mean(FisherZ))
 corr_tibble$Parcel <- as.numeric(gsub("parcel", "", corr_tibble$Parcel))
 corr_tibble <- corr_tibble %>%
   left_join(results_tibble, by = c("Parcel" = "Parcel")) %>% 
   select(-c(p, pfwe, Yeo_17network))
 cor.test(corr_tibble$Fval, corr_tibble$ISC)
+
+# Define the path for the output file
+output_file_path <- file.path(outdir, "SupplementaryFigure1D.csv")
+
+# Write the plot tibble to a CSV file
+write.csv(corr_tibble, output_file_path, row.names = FALSE)
 
 correlation_plot <- ggplot(corr_tibble, aes(x = Fval, y = ISC)) +
   geom_point(color = '#1f77b4', size = 2) +  # Scatter plot

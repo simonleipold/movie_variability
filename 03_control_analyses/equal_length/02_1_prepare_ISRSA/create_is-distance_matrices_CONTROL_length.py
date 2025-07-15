@@ -2,12 +2,10 @@
 import os
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 
 from nltools.data import Brain_Data, Adjacency
-from nltools.mask import expand_mask, roi_to_brain
+from nltools.mask import expand_mask
 
-from nilearn import plotting as nplot
 from sklearn.metrics import pairwise_distances
 
 ## location of main project directory on HPC
@@ -30,16 +28,10 @@ atlas_labels = pd.read_csv(os.path.join(projpath, 'MRI', 'Brainnetome_atlas/Brai
 mov_csv_path = os.path.join(fmriprep_dir, 'derivatives', 'secLev_nltools_ISC_ROI', mask_name, 'csv_files')
 
 ## where should the ISC matrices be stored?
-dir_out = os.path.join(projpath, 'Scripts', '03_2ndLev_ISC', 'matrices')
+dir_out = os.path.join(projpath, 'Scripts', 'MovVar_CommsBio_Revision01', 'control_length', 'matrices')
 if not os.path.exists(os.path.join(dir_out)):
     os.makedirs(os.path.join(dir_out))
     print('Dir %s created ' % dir_out)
-
-## where should the visualizations be stored?
-dir_out_vis = os.path.join(projpath, 'Scripts', '03_2ndLev_ISC', 'visualizations')
-if not os.path.exists(os.path.join(dir_out_vis)):
-    os.makedirs(os.path.join(dir_out_vis))
-    print('Dir %s created ' % dir_out_vis)
 
 # create ISC matrices for each movie
 movie_list = ['movie1', 'movie2', 'movie3', 'movie4', 'movie5', 'movie6', 'movie7', 'movie8']
@@ -52,24 +44,17 @@ for movie in movie_list:
         sub_timeseries.append(sub_data.values)
     data = np.array(sub_timeseries)
     n_subs, n_ts, n_parcels = data.shape
+    print('For %s, the number of timepoints is %s' % (movie, n_ts))
+    # Truncate to 134 TRs/seconds (the length of the shortest movie)
+    data = data[:, :134, :]
+    print('For %s, the number of timepoints after truncating is %s' % (movie, data.shape[1]))
     # calculate the ISC matrix for each parcel
     similarity_matrices = [] # list to store the ISC matrices for each parcel
     for parcel in range(n_parcels):
         # calculate the pairwise similarity between subjects
-        similarity_matrix = 1 - pairwise_distances(data[:, :, parcel], metric = 'correlation')
-        similarity_matrices.append(Adjacency(similarity_matrix, matrix_type='similarity'))
+        similarity_matrix = pairwise_distances(data[:, :, parcel], metric = 'correlation') # correlation distance
+        similarity_matrices.append(Adjacency(similarity_matrix, matrix_type='distance'))
         # put the ISC matrix into a Pandas DataFrame
         df = pd.DataFrame(similarity_matrix, index = subjlist['PID'], columns = subjlist['PID'])
         # save the ISC matrix as a CSV file
-        df.to_csv(os.path.join(dir_out, 'ISC_%s_parcel%s.csv' % (movie, parcel+1)), index = True, header = True)
-    ## generate a visualization of the mean ISC matrix across subjects
-    # extract the mean ISC values across subjects from the similarity matrices and put them into a dictionary
-    isc = {parcel:similarity_matrices[parcel].isc(metric='mean', n_bootstraps=1, n_jobs=1)['isc'] for parcel in range(n_parcels)}
-    isc_brain = roi_to_brain(pd.Series(isc), expand_mask(mask))
-    nplot.plot_glass_brain(isc_brain.to_nifti(),
-        colorbar = True, plot_abs = False,
-        cmap = "viridis",
-        vmin = -0.5, vmax = 0.5)
-    plt.savefig(os.path.join(dir_out_vis, 'Mean_ISC_%s.png' % movie), dpi = 400)
-    plt.close()
-
+        df.to_csv(os.path.join(dir_out, '%s_parcel%s.csv' % (movie, parcel+1)), index = True, header = True)

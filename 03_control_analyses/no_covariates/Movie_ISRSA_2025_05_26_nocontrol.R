@@ -46,7 +46,7 @@ behavior_path <- "dfs_behavior"
 neural_path <- "dfs_neural"
 control_path <- "dfs_control"
 
-out_path <- "r_output"
+out_path <- "r_output_nocontrol"
 if (!dir.exists(out_path)) {
   dir.create(out_path)
 }
@@ -81,6 +81,22 @@ wide_behavioral_data <- behavioral_data %>%
     names_from = TaskSession,  # Use the new TaskSession as the source of new column names
     values_from = Distance     # Fill the new columns with values from the Distance column
   )
+
+## Sidetrip: Correlation between Features and Naming post
+wide_behavioral_data_cleaned <- wide_behavioral_data %>%
+  rowwise() %>%
+  mutate(
+    Subject_min = min(Subject1, Subject2),
+    Subject_max = max(Subject1, Subject2)
+  ) %>%
+  ungroup() %>%
+  distinct(Subject_min, Subject_max, .keep_all = TRUE) %>%
+  select(-Subject_min, -Subject_max)
+
+# correlation
+cor(wide_behavioral_data_cleaned$Features_Post, 
+    wide_behavioral_data_cleaned$Naming_Post, method = "pearson")
+
 
 # Load neural data
 movies <- paste0("movie", 1:8)
@@ -125,13 +141,13 @@ for (movie in movies) {
                       Naming_Pre, Naming_Post, Distance), scale))
     
     # Run mixed model for Pre variables
-    model_pre <- lmer(Distance ~ Features_Pre + Naming_Pre + Age + Sex +
+    model_pre <- lmer(Distance ~ Features_Pre + 
                       (1|Subject1) + (1|Subject2), 
                       data = tmp_combined_ds, 
                       control = lmerControl(optimizer ="Nelder_Mead"))
     
     # Run mixed model for Post variables
-    model_post <- lmer(Distance ~ Features_Post + Naming_Post + Age + Sex +
+    model_post <- lmer(Distance ~ Features_Post + 
                        (1|Subject1) + (1|Subject2), 
                        data = tmp_combined_ds, 
                        control = lmerControl(optimizer ="Nelder_Mead"))
@@ -149,78 +165,55 @@ for (movie in movies) {
 # Generate output ---------------------------------------------------------
 
 # Function to collect and reformat LME results, calculate p-values
-format_out <- function(results, model_type) {
-  # Generate a single tibble containing LME results
+format_out <- function(results, model_type = NULL) {
   results_list <- lapply(results, function(model) {
     tidy(model, effects = "fixed")
   })
   combined_df <- bind_rows(results_list, .id = "Parcel")
-  
-  # Update Parcel names to retain only numeric parts and the model type
   combined_df$Parcel <- gsub("[^0-9]", "", combined_df$Parcel)
   
-  # select features pre
-  features_pre_df <- combined_df %>% filter(term == "Features_Pre")
-  # add p values based on t statistic and fixed degrees of freedom
-  features_pre_df <- features_pre_df %>%
+  # Filter and calculate p-values for Features_Pre and Features_Post only
+  features_pre_df <- combined_df %>%
+    filter(term == "Features_Pre") %>%
     rowwise() %>%
-    mutate(pval = pt(statistic, df = 6216 - 5, lower.tail = FALSE))
-  # select features post
-  features_post_df <- combined_df %>% filter(term == "Features_Post")
-  # add p values based on t statistic and fixed degrees of freedom
-  features_post_df <- features_post_df %>%
-    rowwise() %>%
-    mutate(pval = pt(statistic, df = 6216 - 5, lower.tail = FALSE))
-  # select naming pre
-  naming_pre_df <- combined_df %>% filter(term == "Naming_Pre") 
-  # add p values based on t statistic and fixed degrees of freedom
-  naming_pre_df <- naming_pre_df %>%
-    rowwise() %>%
-    mutate(pval = pt(statistic, df = 6216 - 5, lower.tail = FALSE))
-  # select naming post
-  naming_post_df <- combined_df %>% filter(term == "Naming_Post") 
-  # add p values based on t statistic and fixed degrees of freedom
-  naming_post_df <- naming_post_df %>%
-    rowwise() %>%
-    mutate(pval = pt(statistic, df = 6216 - 5, lower.tail = FALSE))
+    mutate(pval = pt(statistic, df = 6216 - 2, lower.tail = FALSE))
   
-  return(list(features_pre_df, features_post_df, naming_pre_df, 
-              naming_post_df))
+  features_post_df <- combined_df %>%
+    filter(term == "Features_Post") %>%
+    rowwise() %>%
+    mutate(pval = pt(statistic, df = 6216 - 2, lower.tail = FALSE))
+  
+  return(list(features_pre_df, features_post_df))
 }
 
-## function to calculate FDR and FWE-adjusted p-values
+# P-value adjustment function
 pval_out <- function(res_df) {
-  res_df$pvalFDR <- p.adjust(res_df$pval, method = "fdr") # FDR
-  res_df$pvalFWE <- p.adjust(res_df$pval, method = "bonferroni") # FWE
+  res_df$pvalFDR <- p.adjust(res_df$pval, method = "fdr")
+  res_df$pvalFWE <- p.adjust(res_df$pval, method = "bonferroni")
   res_df <- res_df %>% select(Parcel, estimate, statistic, pval, pvalFDR, pvalFWE)
   return(res_df)
 }
 
-# Applying the function to each movie in the lme_results list
+# Apply result extraction to each movie
 movie_dfs <- list()
 for (movie in names(lme_results)) {
   print(movie)
   movie_dfs[[movie]] <- format_out(lme_results[[movie]])
 }
 
-# Loop through each movie and effect to apply pval_out and write to CSV
-effects <- c("features_pre", "features_post", "naming_pre", "naming_post")
+# Write Features_Pre and Features_Post only
+effects <- c("features_pre", "features_post")
 for (movie in names(movie_dfs)) {
   for (i in seq_along(effects)) {
-    # Calculate p-values
     result_df <- pval_out(movie_dfs[[movie]][[i]])
-    
-    # Construct file name based on movie and effect
     file_name <- sprintf("%s/ISRSA_%s_%s.csv", out_path, effects[i], movie)
-    
-    # Write to CSV
     write.table(result_df, file = file_name, sep = ",", row.names = FALSE, quote = FALSE)
   }
 }
 
 # save model list to file for later use (e.g., checking assumptions)
-lme_path = "lme4_models"
-if (!dir.exists(lme_path)) {
-  dir.create(lme_path)
-}
-saveRDS(lme_results, file = "lme4_models/lme_model_list_isrsa.rds")
+# lme_path = "lme4_models"
+# if (!dir.exists(lme_path)) {
+#   dir.create(lme_path)
+# }
+# saveRDS(lme_results, file = "lme4_models/lme_model_list_isrsa.rds")

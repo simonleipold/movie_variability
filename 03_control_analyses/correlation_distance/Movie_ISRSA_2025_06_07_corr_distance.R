@@ -82,6 +82,28 @@ wide_behavioral_data <- behavioral_data %>%
     values_from = Distance     # Fill the new columns with values from the Distance column
   )
 
+# Load Mahalanobis distance data
+mahala_df <- read_csv("dfs_behavior/Mahalanobis/Features_post_df_full_Mahala.csv") %>%
+  mutate(combined_id = paste0(Subject1, "_", Subject2))
+
+# Step 1: Extend wide_behavioral_data with Mahalanobis_F_p column
+wide_behavioral_data_ext <- wide_behavioral_data %>%
+  left_join(mahala_df %>% select(combined_id, Distance), by = "combined_id") %>%
+  rename(Mahalanobis_F_p = Distance)
+
+# Step 2: Collapse by unordered pairs (e.g., 003_004 == 004_003)
+wide_behavioral_data_collapsed <- wide_behavioral_data_ext %>%
+  mutate(pair_id = paste0(pmin(Subject1, Subject2), "_", pmax(Subject1, Subject2))) %>%
+  group_by(pair_id, Pair_Type) %>%
+  summarise(across(c(Features_Post, Features_Pre, Naming_Post, Naming_Pre, Mahalanobis_F_p), mean),
+            Subject1 = first(Subject1),
+            Subject2 = first(Subject2),
+            .groups = "drop")
+
+# Step 3: Correlation between Features post (correlation) and (Mahalanobis)
+cor(wide_behavioral_data_collapsed$Features_Post,
+    wide_behavioral_data_collapsed$Mahalanobis_F_p)
+
 # Load neural data
 movies <- paste0("movie", 1:8)
 parcels <- paste0("parcel", 1:210)
@@ -219,8 +241,8 @@ for (movie in names(movie_dfs)) {
 }
 
 # save model list to file for later use (e.g., checking assumptions)
-lme_path = "lme4_models"
-if (!dir.exists(lme_path)) {
-  dir.create(lme_path)
-}
-saveRDS(lme_results, file = "lme4_models/lme_model_list_isrsa.rds")
+# lme_path = "lme4_models"
+# if (!dir.exists(lme_path)) {
+#   dir.create(lme_path)
+# }
+# saveRDS(lme_results, file = "lme4_models/lme_model_list_isrsa.rds")
