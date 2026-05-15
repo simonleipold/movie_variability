@@ -48,7 +48,7 @@ pval_brain = roi_to_brain(pd.Series(pvalues_df.loc[:, 'pfwe']), mask_x)
 
 ## plot and write threshoded image
 display = nplot.plot_glass_brain(threshold(beta_brain, pval_brain, thr=0.05).to_nifti(),
-    colorbar = True, plot_abs = False, cmap = "plasma", vmin = 0, vmax = 20
+    colorbar = True, plot_abs = False, cmap = "plasma", vmin = 0, vmax = 20, threshold=1e-12
     )
 # Save the plot to a file
 plt.savefig(os.path.join(out_dir, 'ANOVA_ISC_movie_comparison.png'), dpi = 400); plt.close()

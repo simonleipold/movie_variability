@@ -50,5 +50,5 @@ for i, f in enumerate(task_flist):
 
         ## plot and write threshoded image
         display = nplot.plot_glass_brain(threshold(beta_brain, pval_fwe_brain, thr=0.05).to_nifti(),
-            colorbar = True, plot_abs = False, vmin = -6.00, vmax = 6.00, cmap = 'inferno')
+            colorbar = True, plot_abs = False, vmin = -6.00, vmax = 6.00, cmap = 'inferno', threshold=1e-12)
         plt.savefig(os.path.join(out_dir, '%s%s_nocontrol_pFWE005.png' % (f, m)), dpi = 400); plt.close()

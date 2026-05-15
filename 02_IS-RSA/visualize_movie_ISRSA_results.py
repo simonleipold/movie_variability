@@ -58,8 +58,26 @@ for i, f in enumerate(task_flist):
         ## plot and write threshoded image
         display = nplot.plot_glass_brain(threshold(beta_brain, pval_fwe_brain, thr=0.05).to_nifti(),
             # colorbar = True, plot_abs = False, vmin = -0.10, vmax = 0.10, cmap = 'coolwarm',
-            colorbar = True, plot_abs = False, vmin = -6.00, vmax = 6.00, cmap = 'inferno')
+            colorbar = True, plot_abs = False, vmin = -6.00, vmax = 6.00, cmap = 'inferno', threshold=1e-12)
         # display.add_contours(threshold(beta_brain, pval_fwe_brain, thr=0.05).to_nifti(), colors = 'gray')
         plt.savefig(os.path.join(out_dir, '%s%s_pFWE005.png' % (f, m)), dpi = 400); plt.close()
         # threshold(beta_brain, pval_brain, thr=0.05).to_nifti().to_filename(os.path.join(out_dir, '%s%s_qFDR005.nii.gz' % (f, m)))
         # threshold(beta_brain, pval_fwe_brain, thr=0.05).to_nifti().to_filename(os.path.join(out_dir, '%s%s_pFWE005.nii.gz' % (f, m)))
+
+        # --------------------------------------------------------------
+        # unthresholded plot
+        # --------------------------------------------------------------
+        display = nplot.plot_glass_brain(
+            beta_brain.to_nifti(),
+            colorbar=True,
+            plot_abs=False,
+            cmap='inferno',
+            vmin=-6.0,
+            vmax=6.0,
+            threshold=1e-12
+        )
+        plt.savefig(
+            os.path.join(out_dir, '%s%s_unthresholded.png' % (f, m)),
+            dpi=400
+        )
+        plt.close()
