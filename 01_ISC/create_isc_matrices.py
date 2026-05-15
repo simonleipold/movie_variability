@@ -6,9 +6,11 @@ import matplotlib.pyplot as plt
 
 from nltools.data import Brain_Data, Adjacency
 from nltools.mask import expand_mask, roi_to_brain
+from nltools.stats import threshold
 
 from nilearn import plotting as nplot
 from sklearn.metrics import pairwise_distances
+from statsmodels.stats.multitest import fdrcorrection  # Import for FDR correction
 
 ## location of main project directory on HPC
 projpath = '/project/3011157.03/Simon/proj_2022_CABB_movie/'
@@ -41,6 +43,9 @@ if not os.path.exists(os.path.join(dir_out_vis)):
     os.makedirs(os.path.join(dir_out_vis))
     print('Dir %s created ' % dir_out_vis)
 
+## where should the csv results be stored?
+dir_out_bootstrap = os.path.join(projpath, 'Scripts', '03_2ndLev_ISC', 'py_output_permutation')
+
 # create ISC matrices for each movie
 movie_list = ['movie1', 'movie2', 'movie3', 'movie4', 'movie5', 'movie6', 'movie7', 'movie8']
 # load the extracted time series for each movie
@@ -64,12 +69,38 @@ for movie in movie_list:
         df.to_csv(os.path.join(dir_out, 'ISC_%s_parcel%s.csv' % (movie, parcel+1)), index = True, header = True)
     ## generate a visualization of the mean ISC matrix across subjects
     # extract the mean ISC values across subjects from the similarity matrices and put them into a dictionary
-    isc = {parcel:similarity_matrices[parcel].isc(metric='mean', n_bootstraps=1, n_jobs=1)['isc'] for parcel in range(n_parcels)}
+    isc = {parcel:similarity_matrices[parcel].isc(metric='mean', n_samples=1, n_jobs=1)['isc'] for parcel in range(n_parcels)}
     isc_brain = roi_to_brain(pd.Series(isc), expand_mask(mask))
     nplot.plot_glass_brain(isc_brain.to_nifti(),
         colorbar = True, plot_abs = False,
         cmap = "viridis",
-        vmin = -0.5, vmax = 0.5)
+        vmin = -0.5, vmax = 0.5,
+        threshold=1e-12)
     plt.savefig(os.path.join(dir_out_vis, 'Mean_ISC_%s.png' % movie), dpi = 400)
     plt.close()
+    ## statistical testing of the ISC values
+    # calculate bootstrapped p-values for the ISC values
+    p = {parcel:similarity_matrices[parcel].isc(metric='mean', n_samples=10000, n_jobs=1)['p'] for parcel in range(n_parcels)}
+    # create a Pandas DataFrame with the ISC values and p-values
+    df = pd.DataFrame({'ISC':isc, 'p':p})
+    # add column with Bonferroni-corrected p-values
+    df['p_fwe'] = df['p'] * n_parcels
+    # Add column with FDR-corrected p-values
+    reject, p_fdr = fdrcorrection(df['p'], alpha=0.05)
+    df['p_fdr'] = p_fdr
+    # add the parcel numbers to the DataFrame
+    df['parcel'] = np.arange(1, n_parcels+1)
+    # add the parcel names to the DataFrame
+    df['label'] = atlas_labels['label']
+    # reorder the columns
+    df = df[['parcel', 'label', 'ISC', 'p', 'p_fwe', 'p_fdr']]
+    # save the DataFrame as a CSV file
+    df.to_csv(os.path.join(dir_out_bootstrap, 'ISC_%s.csv' % movie), index = False)
+    ## generate a visualization of the mean ISC matrix only for significant parcels
+    # pval_brain = roi_to_brain(pd.Series(df.loc[:, 'p_fwe']), mask_x)
+    # display = nplot.plot_glass_brain(threshold(isc_brain, pval_brain, thr=0.05).to_nifti(),
+    #     cmap = "viridis", colorbar = True, plot_abs = False, vmin = -0.5, vmax = 0.5,
+    #     )
+    ## Save the plot to a file
+    # plt.savefig(os.path.join(dir_out_vis, 'Mean_ISC_%s_thresholded.png' % movie), dpi = 400); plt.close()
 
