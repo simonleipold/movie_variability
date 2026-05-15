@@ -16,3 +16,10 @@ Run the scripts in the following order.
 | 7 | `Movie_ISRSA_2024_07_01.R` | Run the IS-RSA analysis. |
 | 8 | `visualize_movie_ISRSA_results.py` | Visualize IS-RSA results. |
 | 9 | `format_ISRSA_results.py` | Format final IS-RSA outputs. |
+| 10 | `correlate_ISRSA_maps.py` | Correlate IS-RSA maps across movies. |
+
+## Feature-Score Diagnostics
+
+| Script | Notes |
+| --- | --- |
+| `features_2026_05_04.R` | Check Session 2 feature-score completeness, visualize feature-score distributions, and test feature-level sex differences. |
